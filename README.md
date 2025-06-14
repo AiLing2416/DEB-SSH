@@ -8,4 +8,4 @@
 
 ## 立即开始
 ```
-bash <(curl -s https://raw.githubusercontent.com/AiLing2416/DEB-SSH/blob/main/setup-ssh.sh)
+bash <(curl -s https://raw.githubusercontent.com/AiLing2416/DEB-SSH/main/setup-ssh.sh)
