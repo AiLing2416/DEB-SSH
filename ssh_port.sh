@@ -48,7 +48,7 @@ validate_port() {
     if [[ ! "$port" =~ ^[0-9]+$ ]] || (( port < 1024 )) || (( port > 65535 )); then
         log_message "错误: 无效的端口号 '$port'。端口必须是 1024 到 65535 之间的数字。"
         return 1
-    fi
+    F
     return 0
 }
 
@@ -57,10 +57,14 @@ modify_ssh_port() {
     local new_port="$1"
     log_message "正在修改 SSH 端口为 $new_port..."
 
-    # 检查是否存在 Port 配置行，如果存在则修改，否则添加
-    if grep -qE "^\s*Port\s+[0-9]+" "$SSH_CONFIG_FILE"; then
-        sed -i "s/^\s*Port\s+[0-9]\+/Port $new_port/" "$SSH_CONFIG_FILE" || { log_message "错误: 修改 SSH 端口失败。"; exit 1; }
+    # 使用 sed 查找并替换 Port 配置行。
+    # - 如果找到 "Port 数字" (无论是否注释)，则替换为 "Port 新端口"。
+    # - 如果文件中没有 "Port" 开头的行，则在文件末尾添加 "Port 新端口"。
+    if grep -qE "^\s*#?\s*Port\s+[0-9]+" "$SSH_CONFIG_FILE"; then
+        # 匹配以 Port 开头（或被注释的 #Port 开头）的行，然后替换掉
+        sed -i -E "s/^\s*#?\s*Port\s+[0-9]+/Port $new_port/" "$SSH_CONFIG_FILE" || { log_message "错误: 修改 SSH 端口失败。"; exit 1; }
     else
+        # 如果没有找到任何 Port 行，则在文件末尾添加
         echo "Port $new_port" >> "$SSH_CONFIG_FILE" || { log_message "错误: 添加 SSH 端口失败。"; exit 1; }
     fi
     log_message "SSH 端口已修改为 $new_port。"
@@ -71,10 +75,13 @@ update_firewall() {
     local new_port="$1"
     log_message "正在更新防火墙规则..."
 
+    # 尝试从配置文件中获取旧的 SSH 端口，以便在防火墙中移除它
+    # 使用 awk 提取 Port 后的数字，并忽略注释行
+    local current_ssh_port=$(grep -E "^\s*Port\s+[0-9]+" "$SSH_CONFIG_FILE" | awk '{print $2}' | head -n 1) # 获取第一个非注释的 Port
+
     if command -v ufw &> /dev/null; then
         # 针对 UFW (Ubuntu/Debian)
         log_message "检测到 UFW 防火墙。"
-        local current_ssh_port=$(grep -E "^\s*Port\s+[0-9]+" "$SSH_CONFIG_FILE" | awk '{print $2}')
         if [ -n "$current_ssh_port" ] && [ "$current_ssh_port" != "$new_port" ]; then
             log_message "正在关闭旧的 SSH 端口 $current_ssh_port..."
             ufw delete allow "$current_ssh_port/tcp" &>/dev/null
@@ -85,7 +92,6 @@ update_firewall() {
     elif command -v firewall-cmd &> /dev/null; then
         # 针对 FirewallD (CentOS/RHEL)
         log_message "检测到 FirewallD 防火墙。"
-        local current_ssh_port=$(grep -E "^\s*Port\s+[0-9]+" "$SSH_CONFIG_FILE" | awk '{print $2}')
         if [ -n "$current_ssh_port" ] && [ "$current_ssh_port" != "$new_port" ]; then
             log_message "正在关闭旧的 SSH 端口 $current_ssh_port..."
             firewall-cmd --permanent --remove-port="$current_ssh_port/tcp" &>/dev/null
