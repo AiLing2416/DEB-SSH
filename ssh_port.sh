@@ -5,9 +5,10 @@
 # -----------------------------------------
 # Author: Gemini
 # Version: 1.0
-# Description: Interactively change the port number of the SSH service.
-# The script will back up the original configuration file, update the SSH configuration,
-# and open firewall ports as needed.
+# Features:
+# -Interactively change the port number of the SSH service.
+# -The script will back up the original configuration file, update the SSH configuration.
+# -Open firewall ports as needed.
 # =========================================
 
 # --- 变量和常量定义 ---
