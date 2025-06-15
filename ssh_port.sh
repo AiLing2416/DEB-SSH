@@ -1,151 +1,117 @@
 #!/bin/bash
 
-# =========================================
-# Change SSH Port
-# -----------------------------------------
+# ==============================================================================
+# Dedicated SSH Port Changer for Debian-based Systems
 # Author: Gemini
 # Version: 1.0
-# Features:
-# -Interactively change the port number of the SSH service.
-# -The script will back up the original configuration file, update the SSH configuration.
-# -Open firewall ports as needed.
-# =========================================
+# Features: Root check, port validation, config backup, syntax check, UFW firewall integration
+# ==============================================================================
 
-# --- 变量和常量定义 ---
-SSH_CONFIG_FILE="/etc/ssh/sshd_config"
-BACKUP_DIR="/var/backups/ssh_config_backups"
-LOG_FILE="/var/log/ssh_port_change.log"
+# --- 颜色定义 ---
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+BLUE='\033[0;34m'
+NC='\033[0m'
 
-# --- 函数定义 ---
-
-# 记录日志
-log_message() {
-    local message="$1"
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - $message" | tee -a "$LOG_FILE"
-}
-
-# 检查是否为 root 用户
-check_root() {
-    if [ "$EUID" -ne 0 ]; then
-        log_message "错误: 此脚本需要 root 权限才能运行。"
-        echo "请使用 'sudo' 运行此脚本。"
-        exit 1
-    fi
-}
-
-# 备份 SSH 配置文件
-backup_config() {
-    log_message "正在备份 SSH 配置文件..."
-    mkdir -p "$BACKUP_DIR" || { log_message "错误: 无法创建备份目录 $BACKUP_DIR"; exit 1; }
-    local timestamp=$(date '+%Y%m%d%H%M%S')
-    cp "$SSH_CONFIG_FILE" "$BACKUP_DIR/sshd_config.bak.$timestamp" || { log_message "错误: 备份失败。"; exit 1; }
-    log_message "SSH 配置文件已备份至 $BACKUP_DIR/sshd_config.bak.$timestamp"
-}
-
-# 验证端口号是否有效
-validate_port() {
-    local port="$1"
-    if [[ ! "$port" =~ ^[0-9]+$ ]] || (( port < 1024 )) || (( port > 65535 )); then
-        log_message "错误: 无效的端口号 '$port'。端口必须是 1024 到 65535 之间的数字。"
-        return 1
-    F
-    return 0
-}
-
-# 修改 SSH 端口
-modify_ssh_port() {
-    local new_port="$1"
-    log_message "正在修改 SSH 端口为 $new_port..."
-
-    # 使用 sed 查找并替换 Port 配置行。
-    # - 如果找到 "Port 数字" (无论是否注释)，则替换为 "Port 新端口"。
-    # - 如果文件中没有 "Port" 开头的行，则在文件末尾添加 "Port 新端口"。
-    if grep -qE "^\s*#?\s*Port\s+[0-9]+" "$SSH_CONFIG_FILE"; then
-        # 匹配以 Port 开头（或被注释的 #Port 开头）的行，然后替换掉
-        sed -i -E "s/^\s*#?\s*Port\s+[0-9]+/Port $new_port/" "$SSH_CONFIG_FILE" || { log_message "错误: 修改 SSH 端口失败。"; exit 1; }
-    else
-        # 如果没有找到任何 Port 行，则在文件末尾添加
-        echo "Port $new_port" >> "$SSH_CONFIG_FILE" || { log_message "错误: 添加 SSH 端口失败。"; exit 1; }
-    fi
-    log_message "SSH 端口已修改为 $new_port。"
-}
-
-# 更新防火墙规则
-update_firewall() {
-    local new_port="$1"
-    log_message "正在更新防火墙规则..."
-
-    # 尝试从配置文件中获取旧的 SSH 端口，以便在防火墙中移除它
-    # 使用 awk 提取 Port 后的数字，并忽略注释行
-    local current_ssh_port=$(grep -E "^\s*Port\s+[0-9]+" "$SSH_CONFIG_FILE" | awk '{print $2}' | head -n 1) # 获取第一个非注释的 Port
-
-    if command -v ufw &> /dev/null; then
-        # 针对 UFW (Ubuntu/Debian)
-        log_message "检测到 UFW 防火墙。"
-        if [ -n "$current_ssh_port" ] && [ "$current_ssh_port" != "$new_port" ]; then
-            log_message "正在关闭旧的 SSH 端口 $current_ssh_port..."
-            ufw delete allow "$current_ssh_port/tcp" &>/dev/null
-        fi
-        log_message "正在开放新的 SSH 端口 $new_port..."
-        ufw allow "$new_port/tcp" || { log_message "警告: 无法开放 UFW 端口 $new_port。请手动检查。"; }
-        ufw reload &>/dev/null
-    elif command -v firewall-cmd &> /dev/null; then
-        # 针对 FirewallD (CentOS/RHEL)
-        log_message "检测到 FirewallD 防火墙。"
-        if [ -n "$current_ssh_port" ] && [ "$current_ssh_port" != "$new_port" ]; then
-            log_message "正在关闭旧的 SSH 端口 $current_ssh_port..."
-            firewall-cmd --permanent --remove-port="$current_ssh_port/tcp" &>/dev/null
-        fi
-        log_message "正在开放新的 SSH 端口 $new_port..."
-        firewall-cmd --permanent --add-port="$new_port/tcp" || { log_message "警告: 无法开放 FirewallD 端口 $new_port。请手动检查。"; }
-        firewall-cmd --reload &>/dev/null
-    else
-        log_message "未检测到 UFW 或 FirewallD。请手动配置您的防火墙以允许新端口 $new_port。"
-    fi
-}
-
-# 重启 SSH 服务
-restart_ssh_service() {
-    log_message "正在重启 SSH 服务..."
-    if systemctl is-active --quiet sshd; then
-        systemctl restart sshd || { log_message "错误: 重启 SSH 服务失败。请手动检查。"; exit 1; }
-        log_message "SSH 服务已成功重启。"
-    else
-        log_message "SSH 服务未运行或不存在 'sshd' 服务。请手动启动或检查服务名称。"
-        exit 1
-    fi
-}
-
-# --- 主程序逻辑 ---
-
-echo "--- 欢迎使用 SSH 端口修改脚本 ---"
-log_message "SSH 端口修改脚本启动。"
-
-check_root
-
-echo ""
-read -p "请输入您要设置的新的 SSH 端口号 (例如: 2222，范围 1024-65535): " NEW_PORT
-
-validate_port "$NEW_PORT" || { log_message "脚本终止。"; exit 1; }
-
-echo ""
-echo "您选择的新 SSH 端口号是: $NEW_PORT"
-read -p "确认更改吗？(y/N): " confirm
-
-if [[ "$confirm" =~ ^[yY]$ ]]; then
-    backup_config
-    modify_ssh_port "$NEW_PORT"
-    update_firewall "$NEW_PORT"
-    restart_ssh_service
-    log_message "SSH 端口修改流程完成。您现在可以使用新端口 $NEW_PORT 连接 SSH。"
-    echo ""
-    echo "--- 脚本执行完毕 ---"
-    echo "新的 SSH 端口是: $NEW_PORT"
-    echo "请尝试使用新端口连接您的 SSH 服务。"
-else
-    log_message "用户取消了操作。脚本终止。"
-    echo "操作已取消。SSH 端口未做任何更改。"
+# --- 1. 安全检查 ---
+# 必须以 root 身份运行
+if [ "$(id -u)" -ne 0 ]; then
+    echo -e "${RED}错误：此脚本需要以 root 权限运行。请使用 'sudo ./change_ssh_port.sh <端口号>'${NC}"
+    exit 1
 fi
 
-echo ""
-echo "日志文件位于: $LOG_FILE"
+# 检查是否提供了端口参数
+if [ -z "$1" ]; then
+    echo -e "${RED}错误：缺少参数。${NC}"
+    echo "用法: sudo ./change_ssh_port.sh <新的SSH端口号>"
+    exit 1
+fi
+
+# --- 2. 端口验证 ---
+NEW_PORT=$1
+# 正则表达式检查是否为纯数字
+if ! [[ "$NEW_PORT" =~ ^[0-9]+$ ]]; then
+    echo -e "${RED}错误：端口 '$NEW_PORT' 不是一个有效的数字。${NC}"
+    exit 1
+fi
+
+# 检查端口范围
+if [ "$NEW_PORT" -lt 1 ] || [ "$NEW_PORT" -gt 65535 ]; then
+    echo -e "${RED}错误：端口号必须在 1-65535 之间。${NC}"
+    exit 1
+fi
+
+if [ "$NEW_PORT" -lt 1024 ]; then
+    echo -e "${YELLOW}警告：你选择了一个1024以下的熟知端口。这通常不被推荐，但脚本将继续执行。${NC}"
+fi
+
+echo -e "${BLUE}准备将 SSH 端口修改为: ${GREEN}$NEW_PORT${NC}"
+echo "-----------------------------------------------------"
+
+# --- 3. 核心操作 ---
+SSHD_CONFIG_FILE="/etc/ssh/sshd_config"
+
+# a. 自动备份配置文件 (非常重要!)
+BACKUP_FILE="/etc/ssh/sshd_config.bak.$(date +%F_%T)"
+echo "正在备份当前配置文件到: $BACKUP_FILE ..."
+cp "$SSHD_CONFIG_FILE" "$BACKUP_FILE"
+if [ $? -ne 0 ]; then
+    echo -e "${RED}错误：备份失败！操作已中止。${NC}"
+    exit 1
+fi
+echo -e "${GREEN}✅ 备份成功。${NC}"
+
+# b. 修改端口号 (使用 sed, 能处理已存在或被注释的 Port 行)
+echo "正在修改配置文件中的端口号..."
+# 先检查 Port 配置是否存在，不存在则在末尾添加
+if ! grep -qE "^#?Port" "$SSHD_CONFIG_FILE"; then
+    echo -e "\nPort $NEW_PORT" >> "$SSHD_CONFIG_FILE"
+else
+    # 如果存在，则替换它
+    sed -i -E "s/^#?Port [0-9]+/Port $NEW_PORT/" "$SSHD_CONFIG_FILE"
+fi
+echo -e "${GREEN}✅ 配置文件修改完成。${NC}"
+
+
+# c. 检查新配置文件的语法 (非常重要!)
+echo "正在检查新配置文件的语法..."
+sshd -t
+if [ $? -ne 0 ]; then
+    echo -e "${RED}错误：新的SSH配置文件语法不正确！${NC}"
+    echo "正在从备份 $BACKUP_FILE 自动恢复..."
+    cp "$BACKUP_FILE" "$SSHD_CONFIG_FILE"
+    echo -e "${GREEN}✅ 配置文件已恢复。服务器很安全，操作已中止。${NC}"
+    exit 1
+fi
+echo -e "${GREEN}✅ 语法检查通过。${NC}"
+
+# d. 配置防火墙 (UFW)
+if command -v ufw &> /dev/null && ufw status | grep -q 'Status: active'; then
+    echo "检测到 UFW 防火墙处于活动状态，正在配置..."
+    ufw allow "$NEW_PORT/tcp"
+    echo -e "${GREEN}✅ 防火墙规则已添加：允许端口 $NEW_PORT/tcp。${NC}"
+else
+    echo -e "${YELLOW}警告：未检测到活动的 UFW 防火墙。请确保你使用的防火墙（如iptables, firewalld）已手动放行端口 $NEW_PORT/tcp。${NC}"
+fi
+
+# e. 重启 SSH 服务
+echo "正在重启 SSH 服务以应用新配置..."
+systemctl restart sshd
+echo -e "${GREEN}✅ SSH 服务已重启。${NC}"
+
+# --- 4. 最终提示 ---
+echo "-----------------------------------------------------"
+echo -e "${GREEN}🎉 成功！SSH 端口已修改为 ${YELLOW}$NEW_PORT${NC}。${NC}"
+echo
+echo -e "${RED}!!!!!!!!!! 极其重要的后续步骤 !!!!!!!!!!!${NC}"
+echo -e "1. ${YELLOW}请不要关闭当前这个终端窗口！${NC} 这是一个安全绳。"
+echo -e "2. ${YELLOW}请打开一个新的终端窗口${NC}，并使用以下命令尝试连接你的服务器："
+echo -e "   ${BLUE}ssh ${USER}@<你的服务器IP> -p ${NEW_PORT}${NC}"
+echo
+echo -e "3. ${GREEN}如果新连接成功${NC}，恭喜你！你可以安全地关闭这个旧的终端窗口了。"
+echo
+echo -e "4. ${RED}如果新连接失败${NC}，请回到这个旧窗口，执行以下命令进行恢复："
+echo -e "   ${BLUE}sudo cp ${BACKUP_FILE} ${SSHD_CONFIG_FILE} && sudo systemctl restart sshd${NC}"
+echo -e "   这会将一切恢复到修改之前的状态，你可以用旧端口重新登录。"
+echo "-----------------------------------------------------"
