@@ -202,4 +202,4 @@ display_main_menu() {
         2) install_jump_host_tools ;;
         3) install_target_tools; install_jump_host_tools ;;
         q) echo "安装已取消。"; exit 0 ;;
-        *) echo -e "${RED}无效选择，
+        *) echo -e "${RED}无效选择，"
