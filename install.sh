@@ -1,163 +1,221 @@
 #!/bin/bash
 
-# ===================================================================================
-# Final SSH Key Generation, Setup, and Check Script for Debian-based Systems
-# Author: Gemini
-# Version: 3.0
-# Features:
-#   - Dependency check with auto-install
-#   - User choice for enabling/disabling passphrase
-#   - Random password generation if passphrase is enabled but left blank
-#   - Fixed all color output rendering issues
-# ===================================================================================
+# ==============================================================================
+# DEB-SSH 工具集安装与卸载脚本
+# 作者: Gemini
+# 版本: 1.0
+# ==============================================================================
 
-# 设置颜色变量以便输出
+# --- 配置区 ---
+
+# 脚本源 URL
+BASE_URL="https://raw.githubusercontent.com/AiLing2416/DEB-SSH/main"
+
+# 目标机工具集
+TARGET_SCRIPTS=(
+    "keys.sh|dsh-k"
+    "port.sh|dsh-p"
+)
+
+# 跳板机工具集
+JUMP_HOST_SCRIPTS=(
+    "target-manager.sh|tm"
+    "c.sh|c"
+)
+
+# 安装路径 (系统级指令)
+INSTALL_DIR="/usr/local/bin"
+
+# 跳板机脚本的存放路径 (用户家目录)
+JUMP_HOST_CONFIG_DIR_NAME=".ssh_targets"
+
+# --- 颜色定义 ---
 GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
 RED='\033[0;31m'
+YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-# --- 函数：依赖检查与安装 ---
-check_and_install_dependencies() {
-    local missing_deps=()
-    echo -e "${BLUE}1. 正在检查所需依赖...${NC}"
+# --- 辅助函数 ---
 
-    if ! command -v ssh-keygen &> /dev/null; then missing_deps+=("openssh-client"); fi
-    if ! command -v openssl &> /dev/null; then missing_deps+=("openssl"); fi
-
-    if [ ${#missing_deps[@]} -gt 0 ]; then
-        echo -e "${YELLOW}警告：缺少以下必要依赖: ${missing_deps[*]}.${NC}"
-        read -p "是否尝试使用 'sudo apt-get install' 自动安装? (y/N): " choice
-        if [[ "$choice" == "y" || "$choice" == "Y" ]]; then
-            sudo apt-get update && sudo apt-get install -y "${missing_deps[@]}"
-            if [ $? -ne 0 ]; then echo -e "${RED}依赖安装失败！请手动安装后重试。${NC}"; exit 1; fi
-            echo -e "${GREEN}依赖已成功安装！${NC}"
-        else
-            echo -e "${RED}用户取消。请先手动安装 ${missing_deps[*]} 后再运行此脚本。${NC}"; exit 1
-        fi
-    else
-        echo -e "${GREEN}✅ 所有依赖均已满足。${NC}"
+# 检查是否以 root 身份运行
+check_root() {
+    if [ "$(id -u)" -ne 0 ]; then
+        echo -e "${RED}错误: 此脚本需要以 root 权限运行。请使用 'sudo bash $0'。${NC}"
+        exit 1
     fi
 }
 
-# --- 主脚本逻辑 ---
-
-# 步骤 1: 运行依赖检查
-check_and_install_dependencies
-echo "-----------------------------------------------------"
-
-# 步骤 2: 获取用户信息与配置密码
-echo -e "${BLUE}2. 正在配置 SSH 密钥...${NC}"
-CURRENT_USER=$(whoami)
-HOSTNAME=$(hostname)
-DEFAULT_COMMENT="${CURRENT_USER}@${HOSTNAME}-$(date +%Y%m%d)"
-PASSPHRASE=""
-RANDOM_PASS_GENERATED=false
-
-echo "密钥将使用目前最安全的 Ed25519 算法生成。"
-read -p "请输入密钥的注释 (直接回车将使用默认值: ${DEFAULT_COMMENT}): " KEY_COMMENT
-KEY_COMMENT=${KEY_COMMENT:-$DEFAULT_COMMENT}
-
-# 新增：询问用户是否要添加密码
-echo
-echo -e "${YELLOW}说明：${NC}为私钥添加密码是一个非常重要的安全措施。"
-echo -e "它能确保即使您的私钥文件（id_ed25519）被盗，黑客没有密码也无法使用它。"
-read -p "是否为您的私钥添加密码保护? [Y/n]: " use_passphrase
-echo
-
-# 根据用户选择处理密码
-if [[ "$use_passphrase" =~ ^[nN]$ ]]; then
-    # 用户选择不使用密码
-    PASSPHRASE=""
-    echo -e "${YELLOW}您选择不设置密码。请务必保证私钥文件的绝对安全！${NC}"
-else
-    # 用户选择使用密码（默认选项）
-    read -s -p "请输入一个强密码来保护你的私钥 (留空则自动生成): " PASSPHRASE
-    echo
-    if [ -z "$PASSPHRASE" ]; then
-        # 留空，自动生成随机密码
-        PASSPHRASE=$(tr -dc 'a-zA-Z0-9' < /dev/urandom | head -c 8)
-        RANDOM_PASS_GENERATED=true
-        echo -e "${YELLOW}您未设置密码，已为您生成一个随机密码: ${GREEN}${PASSPHRASE}${NC}"
-        echo -e "${YELLOW}请务必记下此密码！${NC}"
+# 获取真实用户的家目录 (即使在 sudo下也能工作)
+get_user_home() {
+    if [ -n "$SUDO_USER" ]; then
+        echo "/home/$SUDO_USER"
     else
-        # 手动输入密码，要求确认
-        read -s -p "请再次输入密码以确认: " PASSPHRASE_CONFIRM
-        echo
-        if [ "$PASSPHRASE" != "$PASSPHRASE_CONFIRM" ]; then
-            echo -e "${RED}两次输入的密码不匹配，脚本终止。${NC}"; exit 1
+        # 如果直接以root登录，则可能是/root
+        echo "$HOME"
+    fi
+}
+
+# --- 核心功能函数 ---
+
+install_target_tools() {
+    echo -e "\n${YELLOW}>>> 正在安装目标机工具集...${NC}"
+    for script_info in "${TARGET_SCRIPTS[@]}"; do
+        IFS='|' read -r SCRIPT_NAME CMD_NAME <<< "$script_info"
+        echo -n "  - 正在安装 ${CMD_NAME}... "
+        curl -sSL "${BASE_URL}/${SCRIPT_NAME}" -o "${INSTALL_DIR}/${CMD_NAME}"
+        if [ $? -eq 0 ]; then
+            chmod +x "${INSTALL_DIR}/${CMD_NAME}"
+            echo -e "${GREEN}[成功]${NC}"
+        else
+            echo -e "${RED}[失败] - 下载文件时出错。${NC}"
         fi
-        echo -e "${GREEN}密码设置成功。${NC}"
-    fi
-fi
+    done
+}
 
-# 步骤 3: 密钥生成与配置
-echo -e "\n${BLUE}3. 正在执行密钥生成与服务器配置...${NC}"
-SSH_DIR="$HOME/.ssh"
-KEY_NAME="id_ed25519"
-PRIVATE_KEY_PATH="${SSH_DIR}/${KEY_NAME}"
-PUBLIC_KEY_PATH="${SSH_DIR}/${KEY_NAME}.pub"
-AUTHORIZED_KEYS_PATH="${SSH_DIR}/authorized_keys"
+install_jump_host_tools() {
+    echo -e "\n${YELLOW}>>> 正在安装跳板机工具集...${NC}"
+    local USER_HOME=$(get_user_home)
+    local JUMP_HOST_BASE_DIR="${USER_HOME}/${JUMP_HOST_CONFIG_DIR_NAME}"
+    local JUMP_HOST_SCRIPT_DIR="${JUMP_HOST_BASE_DIR}/scripts"
+    
+    # 1. 创建目录结构
+    echo "  - 正在创建配置目录: ${JUMP_HOST_BASE_DIR}"
+    mkdir -p "${JUMP_HOST_BASE_DIR}/keys"
+    mkdir -p "${JUMP_HOST_SCRIPT_DIR}"
+    chown -R "$SUDO_USER:$SUDO_USER" "$JUMP_HOST_BASE_DIR" 2>/dev/null
 
-# 创建 .ssh 目录并设置权限
-mkdir -p "$SSH_DIR"
-chmod 700 "$SSH_DIR"
-echo "✅ 权限已确认/设置为 700 for ${SSH_DIR}"
-
-# 生成 SSH 密钥对
-echo "正在生成 Ed25519 密钥对..."
-ssh-keygen -t ed25519 -C "$KEY_COMMENT" -f "$PRIVATE_KEY_PATH" -N "$PASSPHRASE" -q
-
-if [ $? -ne 0 ]; then echo -e "${RED}密钥生成失败！${NC}"; exit 1; fi
-
-# 配置 authorized_keys
-cat "$PUBLIC_KEY_PATH" >> "$AUTHORIZED_KEYS_PATH"
-chmod 600 "$AUTHORIZED_KEYS_PATH"
-echo "✅ 公钥已添加，权限已设置为 600 for ${AUTHORIZED_KEYS_PATH}"
-
-# 准备供下载的私钥
-DOWNLOAD_DIR="$HOME/new_ssh_private_key_$(date +%s)"
-mkdir -p "$DOWNLOAD_DIR" && chmod 700 "$DOWNLOAD_DIR"
-cp "$PRIVATE_KEY_PATH" "$DOWNLOAD_DIR/" && chmod 600 "${DOWNLOAD_DIR}/${KEY_NAME}"
-echo "✅ 私钥已准备好供您下载。"
-
-# 步骤 4: 显示最终的重要信息 (已修复所有 echo 输出)
-echo -e "\n-----------------------------------------------------"
-echo -e "${GREEN}✅✅✅ SSH 密钥配置成功！✅✅✅${NC}\n"
-echo -e "${RED}!!!!!!!!!! 重要：请立即执行以下操作 !!!!!!!!!!!${NC}"
-
-# 如果设置了密码，再次提醒
-if [ -n "$PASSPHRASE" ]; then
-    if [ "$RANDOM_PASS_GENERATED" = true ]; then
-        echo -e "${YELLOW}🔑 您的随机生成的私钥密码是: ${GREEN}${PASSPHRASE}${NC}"
-        echo -e "${YELLOW}   (这是您唯一一次看到此密码，请务必妥善保管！)${NC}\n"
+    # 2. 下载脚本
+    for script_info in "${JUMP_HOST_SCRIPTS[@]}"; do
+        IFS='|' read -r SCRIPT_NAME CMD_NAME <<< "$script_info"
+        echo -n "  - 正在下载 ${SCRIPT_NAME}... "
+        curl -sSL "${BASE_URL}/${SCRIPT_NAME}" -o "${JUMP_HOST_SCRIPT_DIR}/${SCRIPT_NAME}"
+        if [ $? -eq 0 ]; then
+            chmod +x "${JUMP_HOST_SCRIPT_DIR}/${SCRIPT_NAME}"
+            echo -e "${GREEN}[成功]${NC}"
+        else
+            echo -e "${RED}[失败] - 下载文件时出错。${NC}"
+        fi
+    done
+    
+    # 3. 配置别名
+    echo "  - 正在配置 Shell 别名..."
+    local SHELL_CONFIG_FILE=""
+    if [ -f "${USER_HOME}/.zshrc" ]; then
+        SHELL_CONFIG_FILE="${USER_HOME}/.zshrc"
+    elif [ -f "${USER_HOME}/.bashrc" ]; then
+        SHELL_CONFIG_FILE="${USER_HOME}/.bashrc"
     else
-        echo -e "${GREEN}ℹ️ 请记住您为私钥设置的密码，登录时需要使用。${NC}\n"
+        echo -e "  ${YELLOW}警告: 找不到 .bashrc 或 .zshrc 文件。请手动配置别名。${NC}"
+        return
     fi
+
+    # 别名配置块，方便卸载
+    ALIAS_BLOCK="
+# --- DEB-SSH Aliases ---
+alias tm=\"bash ${JUMP_HOST_SCRIPT_DIR}/target-manager.sh\"
+alias c=\"bash ${JUMP_HOST_SCRIPT_DIR}/c.sh\"
+# --- End DEB-SSH Aliases ---
+"
+    # 检查是否已存在，不存在则添加
+    if ! grep -q "# --- DEB-SSH Aliases ---" "$SHELL_CONFIG_FILE"; then
+        echo "$ALIAS_BLOCK" >> "$SHELL_CONFIG_FILE"
+        echo -e "  ${GREEN}别名已成功添加到 ${SHELL_CONFIG_FILE}${NC}"
+    else
+        echo -e "  ${YELLOW}别名已存在，跳过添加。${NC}"
+    fi
+}
+
+uninstall_all() {
+    echo -e "\n${YELLOW}>>> 正在卸载 DEB-SSH 工具集...${NC}"
+    local USER_HOME=$(get_user_home)
+
+    # 1. 移除系统级指令
+    echo "  - 正在移除目标机指令..."
+    for script_info in "${TARGET_SCRIPTS[@]}"; do
+        IFS='|' read -r _ CMD_NAME <<< "$script_info"
+        rm -f "${INSTALL_DIR}/${CMD_NAME}"
+    done
+
+    # 2. 移除 Shell 别名
+    echo "  - 正在移除 Shell 别名..."
+    for config_file in "${USER_HOME}/.bashrc" "${USER_HOME}/.zshrc"; do
+        if [ -f "$config_file" ]; then
+            # 使用sed删除别名块，并创建备份
+            sed -i.bak '/# --- DEB-SSH Aliases ---/,/# --- End DEB-SSH Aliases ---/d' "$config_file"
+        fi
+    done
+
+    # 3. 询问是否移除配置文件和目录
+    echo ""
+    read -p "$(echo -e ${YELLOW}"是否要彻底移除跳板机配置文件和私钥目录 (~/${JUMP_HOST_CONFIG_DIR_NAME})？这是一个危险操作！[y/N]: "${NC})" CONFIRM
+    
+    if [[ "$CONFIRM" =~ ^[Yy]$ ]]; then
+        echo "  - 正在移除配置目录: ${USER_HOME}/${JUMP_HOST_CONFIG_DIR_NAME}"
+        rm -rf "${USER_HOME}/${JUMP_HOST_CONFIG_DIR_NAME}"
+        echo -e "  ${GREEN}配置目录已移除。${NC}"
+    else
+        echo "  - 保留了配置目录。"
+    fi
+    
+    echo -e "\n${GREEN}卸载完成！${NC}"
+    echo "请运行 'source ~/.bashrc' 或 'source ~/.zshrc'，或重新打开终端以使更改完全生效。"
+}
+
+display_main_menu() {
+    clear
+    echo "=========================================="
+    echo "    DEB-SSH 工具集 安装程序"
+    echo "=========================================="
+    echo "请选择要安装的组件："
+    echo ""
+    echo "  1) 目标机工具集 (dsh-k, dsh-p)"
+    echo "     (用于创建密钥、修改端口等基础操作)"
+    echo ""
+    echo "  2) 跳板机工具集 (tm, c)"
+    echo "     (用于管理和连接多个远程服务器)"
+    echo ""
+    echo "  3) 全部安装"
+    echo ""
+    echo "  q) 退出"
+    echo "=========================================="
+    read -p "请输入您的选择 [1-3, q]: " choice
+    
+    case "$choice" in
+        1)
+            install_target_tools
+            ;;
+        2)
+            install_jump_host_tools
+            ;;
+        3)
+            install_target_tools
+            install_jump_host_tools
+            ;;
+        q)
+            echo "安装已取消。"
+            exit 0
+            ;;
+        *)
+            echo -e "${RED}无效选择，请重试。${NC}"
+            sleep 1
+            display_main_menu
+            ;;
+    esac
+}
+
+# --- 脚本主入口 ---
+
+# 检查是否为卸载模式
+if [ "$1" == "-del" ] || [ "$1" == "--uninstall" ]; then
+    check_root
+    uninstall_all
+    exit 0
 fi
 
-echo -e "1.  ${YELLOW}下载你的私钥${NC}：私钥已保存到服务器的以下目录中："
-echo -e "    ${BLUE}${DOWNLOAD_DIR}/${KEY_NAME}${NC}"
-echo -e "    请使用 scp 或 sftp 等工具将其下载到你的【本地电脑】。例如："
-echo -e "    ${BLUE}scp ${CURRENT_USER}@<你的服务器IP>:${DOWNLOAD_DIR}/${KEY_NAME} ./${NC}"
-echo
+# 正常安装模式
+check_root
+display_main_menu
 
-echo -e "2.  ${YELLOW}删除服务器上的私钥备份${NC}：下载完成后，请务必删除服务器上的这个临时目录："
-echo -e "    ${BLUE}rm -rf ${DOWNLOAD_DIR}${NC}"
-echo
-
-echo -e "3.  ${YELLOW}测试登录${NC}：使用新密钥从你的本地电脑尝试登录服务器："
-echo -e "    ${BLUE}ssh -i /path/to/your/downloaded/${KEY_NAME} ${CURRENT_USER}@<你的服务器IP>${NC}"
-if [ -n "$PASSPHRASE" ]; then
-    echo -e "    登录时会提示输入密码，请输入你刚才设置或脚本生成的那个【私钥密码】。"
-else
-    echo -e "    由于未设置私钥密码，应该可以直接登录，无需输入额外密码。"
-fi
-echo
-
-echo -e "4.  ${YELLOW}禁用密码登录（最终安全步骤）${NC}："
-echo -e "    确认密钥登录完全没问题后，编辑 ${YELLOW}/etc/ssh/sshd_config${NC} 文件，"
-echo -e "    找到并修改 ${YELLOW}PasswordAuthentication yes${NC} 为 ${YELLOW}PasswordAuthentication no${NC}，"
-echo -e "    然后重启 SSH 服务：${YELLOW}sudo systemctl restart sshd${NC}"
-echo -e "-----------------------------------------------------"
+echo -e "\n${GREEN}🎉 安装完成！${NC}"
+echo "请运行 'source ~/.bashrc' 或 'source ~/.zshrc'，或重新打开一个终端来使用新命令。"
+echo ""
