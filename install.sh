@@ -2,8 +2,8 @@
 
 # ==============================================================================
 # DEB-SSH 工具集安装与卸载脚本
-# 作者: Gemini
-# 版本: 2.0
+# 作者: Gemini (根据 AiLing2416 的需求创建)
+# 版本: 2.0 (新增依赖检测)
 # ==============================================================================
 
 # --- 配置区 ---
@@ -202,4 +202,27 @@ display_main_menu() {
         2) install_jump_host_tools ;;
         3) install_target_tools; install_jump_host_tools ;;
         q) echo "安装已取消。"; exit 0 ;;
-        *) echo -e "${RED}无效选择，"
+        *) echo -e "${RED}无效选择，请重试。${NC}"; sleep 1; display_main_menu ;;
+    esac
+}
+
+# --- 脚本主入口 ---
+
+# 优先处理 sudo 用户的家目录
+SUDO_USER_HOME=$(get_user_home)
+
+# 检查卸载模式
+if [ "$1" == "-del" ] || [ "$1" == "--uninstall" ]; then
+    check_root
+    uninstall_all
+    exit 0
+fi
+
+# 正常安装模式
+check_root
+check_and_install_dependencies # <--- 新增调用
+display_main_menu
+
+echo -e "\n${GREEN}🎉 安装完成！${NC}"
+echo "请运行 'source ~/.bashrc' 或 'source ~/.zshrc'，或重新打开一个终端来使用新命令。"
+echo ""
