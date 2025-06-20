@@ -3,7 +3,7 @@
 # ==============================================================================
 # DEB-SSH 工具集安装与卸载脚本
 # 作者: Gemini (根据 AiLing2416 的需求创建)
-# 版本: 2.1 (修正卸载提示中的引号错误)
+# 版本: 2.0 (新增依赖检测)
 # ==============================================================================
 
 # --- 配置区 ---
@@ -33,7 +33,7 @@ get_user_home() {
     echo "${SUDO_USER_HOME:-$HOME}"
 }
 
-# --- 依赖检测与安装函数 ---
+# --- 新增：依赖检测与安装函数 ---
 check_and_install_dependencies() {
     echo -e "${YELLOW}>>> 正在检查脚本依赖...${NC}"
     
@@ -92,7 +92,7 @@ check_and_install_dependencies() {
 }
 
 
-# --- 核心功能函数 ---
+# --- 核心功能函数 (与之前版本相同) ---
 
 install_target_tools() {
     echo -e "\n${YELLOW}>>> 正在安装目标机工具集...${NC}"
@@ -170,12 +170,7 @@ uninstall_all() {
     done
 
     echo ""
-    # --- 已修正的部分 ---
-    # 先用 echo -e 打印带颜色的提示，然后用 read 读取输入
-    # 这样避免了在 read -p 中复杂的引号嵌套问题
-    echo -e -n "${YELLOW}是否要彻底移除跳板机配置文件和私钥目录 (~/${JUMP_HOST_CONFIG_DIR_NAME})？这是一个危险操作！[y/N]: ${NC}"
-    read CONFIRM
-    # --- 修正结束 ---
+    read -p "$(echo -e ${YELLOW}"是否要彻底移除跳板机配置文件和私钥目录 (~/${JUMP_HOST_CONFIG_DIR_NAME})？这是一个危险操作！[y/N]: "${NC})" CONFIRM
     
     if [[ "$CONFIRM" =~ ^[Yy]$ ]]; then
         echo "  - 正在移除配置目录: ${SUDO_USER_HOME}/${JUMP_HOST_CONFIG_DIR_NAME}"
@@ -192,7 +187,7 @@ uninstall_all() {
 display_main_menu() {
     clear
     echo "=========================================="
-    echo "    DEB-SSH 工具集 安装程序 (v2.1)"
+    echo "    DEB-SSH 工具集 安装程序 (v2.0)"
     echo "=========================================="
     echo "请选择要安装的组件："
     echo "  1) 目标机工具集 (dsh-k, dsh-p)"
@@ -214,11 +209,20 @@ display_main_menu() {
 # --- 脚本主入口 ---
 
 # 优先处理 sudo 用户的家目录
-if [ -n "$SUDO_USER" ]; then
-    SUDO_USER_HOME=$(getent passwd "$SUDO_USER" | cut -d: -f6)
-else
-    SUDO_USER_HOME=$HOME
-fi
+SUDO_USER_HOME=$(get_user_home)
 
 # 检查卸载模式
-if [ "$1" == "-del"
+if [ "$1" == "-del" ] || [ "$1" == "--uninstall" ]; then
+    check_root
+    uninstall_all
+    exit 0
+fi
+
+# 正常安装模式
+check_root
+check_and_install_dependencies # <--- 新增调用
+display_main_menu
+
+echo -e "\n${GREEN}🎉 安装完成！${NC}"
+echo "请运行 'source ~/.bashrc' 或 'source ~/.zshrc'，或重新打开一个终端来使用新命令。"
+echo ""
