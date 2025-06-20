@@ -8,9 +8,6 @@
 
 ## 立即开始
 ```
-bash <(curl -s https://raw.githubusercontent.com/AiLing2416/DEB-SSH/main/setup-ssh.sh)
+bash <(curl -sSL https://raw.githubusercontent.com/AiLing2416/DEB-SSH/main/install.sh)
 ```
-如需更改端口可使用以下命令 + [Port]
-```
-bash <(curl -s https://raw.githubusercontent.com/AiLing2416/DEB-SSH/refs/heads/main/ssh_port.sh)
-```
+
