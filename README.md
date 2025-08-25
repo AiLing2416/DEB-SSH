@@ -6,8 +6,13 @@
 
 急速完成-轻松上手
 
-## 立即开始
+## 立即安装
 ```
 bash <(curl -sSL https://raw.githubusercontent.com/AiLing2416/DEB-SSH/main/install.sh)
 ```
 
+
+## 为当前用户自动配置公钥
+```
+bash <(curl -sSL https://raw.githubusercontent.com/AiLing2416/DEB-SSH/main/key.sh)
+```
