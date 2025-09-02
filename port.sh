@@ -17,14 +17,14 @@ NC='\033[0m'
 # --- 1. 安全检查 ---
 # 必须以 root 身份运行
 if [ "$(id -u)" -ne 0 ]; then
-    echo -e "${RED}错误：此脚本需要以 root 权限运行。请使用 'sudo ./change_ssh_port.sh <端口号>'${NC}"
+    echo -e "${RED}错误：此脚本需要以 root 权限运行。请使用 'sudo ./port.sh <端口号>'${NC}"
     exit 1
 fi
 
 # 检查是否提供了端口参数
 if [ -z "$1" ]; then
     echo -e "${RED}错误：缺少参数。${NC}"
-    echo "用法: sudo ./change_ssh_port.sh <新的SSH端口号>"
+    echo "用法: sudo ./port.sh <新的SSH端口号>"
     exit 1
 fi
 
