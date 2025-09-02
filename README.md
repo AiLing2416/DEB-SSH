@@ -16,3 +16,10 @@ bash <(curl -sSL https://raw.githubusercontent.com/AiLing2416/DEB-SSH/main/insta
 ```
 bash <(curl -sSL https://raw.githubusercontent.com/AiLing2416/DEB-SSH/main/keys.sh)
 ```
+
+
+## 自动配置端口
+### 用法： command + port
+```
+bash <(curl -sSL https://raw.githubusercontent.com/AiLing2416/DEB-SSH/main/port.sh)
+```
