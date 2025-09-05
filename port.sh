@@ -25,6 +25,8 @@ if [[ ! "$PORT" =~ ^[0-9]+$ || "$PORT" -lt 1 || "$PORT" -gt 65535 ]]; then
     exit 1
 fi
 
+echo -e "${RED}警告：更改端口后，请勿立即关闭当前连接！先用新端口测试SSH连接成功后再关闭旧会话。${NC}"
+
 sed -i "s/^#Port .*/Port $PORT/" /etc/ssh/sshd_config
 sed -i "s/^Port .*/Port $PORT/" /etc/ssh/sshd_config
 
