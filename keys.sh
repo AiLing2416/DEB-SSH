@@ -20,7 +20,7 @@ if [ "$1" = "generate" ]; then
         echo -e "${GREEN}私钥生成完成! 公钥: $(cat "$RAND_DIR/id_rsa.pub")${NC}"
     else
         ssh-keygen -t rsa -b 4096 -f ~/.ssh/id_rsa -N ""
-        echo -e "${GREEN}私钥生成完成! 公钥: $(cat ~/.ssh/id_rsa.pub")${NC}"
+        echo -e "${GREEN}私钥生成完成! 公钥: $(cat ~/.ssh/id_rsa.pub)${NC}"
     fi
 elif [ "$1" = "add" ]; then
     # 添加公钥
