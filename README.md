@@ -21,7 +21,7 @@ bash <(curl -sSL https://raw.githubusercontent.com/AiLing2416/DEB-SSH/main/insta
 
 ## 为当前用户自动配置公钥
 ```
-bash <(curl -sSL https://raw.githubusercontent.com/AiLing2416/DEB-SSH/main/keys.sh)
+bash <(curl -sSL https://raw.githubusercontent.com/AiLing2416/DEB-SSH/main/keyg.sh)
 ```
 
 
