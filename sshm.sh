@@ -3,7 +3,7 @@
 # ==============================================================================
 # SSH Alias Management Script (sshm)
 # Description: A tool to easily add, remove, modify, list, and connect to SSH hosts.
-#              Features smart IP address handling.
+#              Features smart IP address and port handling.
 # Author: Gemini
 # ==============================================================================
 
@@ -67,8 +67,15 @@ list_hosts() {
                     }
                     close(cmd);
                 }
+                
+                # FEATURE: Append port to hostname if not default 22
+                display_name = hostname;
+                if (port != 22) {
+                    display_name = hostname ":" port;
+                }
+
                 auth_method = keyfile ? "密钥 (Key)" : "密码 (Password)";
-                printf "  %-16s -> %s@%s (%s)\n", host, user, hostname, auth_method;
+                printf "  %-16s -> %s@%s (%s)\n", host, user, display_name, auth_method;
             }
         }
         $1 == "Host" {
@@ -76,10 +83,12 @@ list_hosts() {
             host = $2;
             user = "n/a";
             hostname = "n/a";
+            port = "22"; # FEATURE: Default port is 22
             keyfile = "";
         }
         $1 == "HostName" { hostname = $2 }
         $1 == "User" { user = $2 }
+        $1 == "Port" { port = $2 } # FEATURE: Read Port directive
         $1 == "IdentityFile" { keyfile = $2 }
         END { print_host() }
     ' "$CONFIG_FILE"
@@ -117,6 +126,13 @@ add_host() {
     read -p "请输入登录用户名: " user
     [ -z "$user" ] && die "用户名不能为空。"
 
+    # FEATURE: Add port selection
+    read -p "请输入 SSH 端口 (默认为 22): " port
+    port=${port:-22}
+    if [[ ! "$port" =~ ^[0-9]+$ || "$port" -lt 1 || "$port" -gt 65535 ]]; then
+        die "无效的端口号 '$port'。请输入 1-65535 之间的数字。"
+    fi
+
     prompt "请粘贴您的私钥内容，然后按 CTRL+D 确认。"
     prompt "(如果希望使用密码登录，请直接按 CTRL+D)"
     local key_data; key_data=$(cat)
@@ -134,6 +150,10 @@ add_host() {
 
     {
         echo ""; echo "Host $alias"; echo "    HostName $hostname"; echo "    User $user";
+        # FEATURE: Only add Port directive if it's not the default
+        if [ "$port" -ne 22 ]; then
+            echo "    Port $port"
+        fi
         [ -n "$identity_file_line" ] && echo "$identity_file_line";
     } >> "$CONFIG_FILE"
 
@@ -174,15 +194,24 @@ modify_host() {
 
     local current_hostname; current_hostname=$(awk "/^Host ${alias}$/{f=1} f&&/HostName/{print \$2; exit}" "$CONFIG_FILE")
     local current_user; current_user=$(awk "/^Host ${alias}$/{f=1} f&&/User/{print \$2; exit}" "$CONFIG_FILE")
+    # FEATURE: Get current port, default to 22 if not specified
+    local current_port; current_port=$(awk "/^Host ${alias}$/{f=1} f&&/Port/{print \$2; exit}" "$CONFIG_FILE")
+    current_port=${current_port:-22}
     local current_keyfile; current_keyfile=$(awk "/^Host ${alias}$/{f=1} f&&/IdentityFile/{print \$2; exit}" "$CONFIG_FILE")
     
     read -p "新主机地址 (当前: $current_hostname): " new_hostname_input
-    # Use temporary variable for input before formatting
     local final_hostname_input=${new_hostname_input:-$current_hostname}
     new_hostname=$(format_hostname "$final_hostname_input")
     
     read -p "新用户名 (当前: $current_user): " new_user
     new_user=${new_user:-$current_user}
+
+    # FEATURE: Modify port
+    read -p "新 SSH 端口 (当前: $current_port): " new_port_input
+    new_port=${new_port_input:-$current_port}
+    if [[ ! "$new_port" =~ ^[0-9]+$ || "$new_port" -lt 1 || "$new_port" -gt 65535 ]]; then
+        die "无效的端口号 '$new_port'。请输入 1-65535 之间的数字。"
+    fi
 
     local new_identity_file_line=""
     if [ -n "$current_keyfile" ]; then
@@ -209,7 +238,11 @@ modify_host() {
 
     awk -v alias="$alias" 'BEGIN{p=1} $1=="Host"&&$2==alias{p=0} $1=="Host"&&$2!=alias{p=1} !NF&&p==0{next} p{print}' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
     
-    { echo ""; echo "Host $alias"; echo "    HostName $new_hostname"; echo "    User $new_user"; [ -n "$new_identity_file_line" ] && echo "$new_identity_file_line"; } >> "$CONFIG_FILE"
+    { 
+        echo ""; echo "Host $alias"; echo "    HostName $new_hostname"; echo "    User $new_user"; 
+        if [ "$new_port" -ne 22 ]; then echo "    Port $new_port"; fi
+        [ -n "$new_identity_file_line" ] && echo "$new_identity_file_line"; 
+    } >> "$CONFIG_FILE"
 
     success "主机 '$alias' 的配置已更新。"
     echo; list_hosts
@@ -218,7 +251,7 @@ modify_host() {
 
 usage() {
     echo -e "${C_YELLOW}SSH 主机管理脚本 (sshm)${C_RESET}"
-    echo "一个用于简化 ~/.ssh/config 管理的命令行工具，支持智能 IP 处理。"
+    echo "一个用于简化 ~/.ssh/config 管理的命令行工具，支持智能 IP 和端口处理。"
     echo
     echo "用法: sshm [参数]"
     echo
