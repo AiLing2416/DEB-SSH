@@ -8,7 +8,7 @@
 ```
 bash <(curl -sSL https://raw.githubusercontent.com/AiLing2416/DEB-SSH/main/install.sh)
 ```
-### sshm -h 获取帮助
+sshm -h 获取帮助
 
 ## 为当前用户自动配置公钥
 ```
@@ -16,7 +16,7 @@ bash <(curl -sSL https://raw.githubusercontent.com/AiLing2416/DEB-SSH/main/keyg.
 ```
 
 ## 自动配置端口
-### 用法： command + port
+用法： command + port
 ```
 bash <(curl -sSL https://raw.githubusercontent.com/AiLing2416/DEB-SSH/main/port.sh)
 ```
