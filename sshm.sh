@@ -3,7 +3,7 @@
 # ==============================================================================
 # SSH Alias Management Script (sshm)
 # Description: A tool to easily add, remove, modify, list, and connect to SSH hosts.
-#              Features smart IP address and port handling.
+#              Features smart IP address and port handling, and command-line shortcuts.
 # Author: Gemini
 # ==============================================================================
 
@@ -54,7 +54,7 @@ list_hosts() {
     if [ ! -s "$CONFIG_FILE" ] || ! grep -q -E "^\s*Host\s+" "$CONFIG_FILE"; then
         echo "No hosts configured."
         info "-------------------------------"
-        return
+        return 1
     fi
     
     awk '
@@ -94,6 +94,7 @@ list_hosts() {
     ' "$CONFIG_FILE"
     
     info "-------------------------------"
+    return 0
 }
 
 # Function to handle IPv4 address shorthand completion
@@ -111,9 +112,15 @@ format_hostname() {
 }
 
 add_host() {
+    local alias=$1
     info "--- Add New Host Configuration ---"
     
-    read -p "请输入新主机的别名: " alias
+    if [ -z "$alias" ]; then
+        read -p "请输入新主机的别名: " alias
+    else
+        info "正在为别名 '$alias' 添加新主机..."
+    fi
+
     [ -z "$alias" ] && die "主机别名不能为空。"
     if grep -q -E "^\s*Host\s+$alias\s*$" "$CONFIG_FILE"; then
         die "主机别名 '$alias' 已存在。"
@@ -162,8 +169,13 @@ add_host() {
 }
 
 remove_host() {
-    read -p "请输入要移除的主机别名: " alias
-    [ -z "$alias" ] && die "主机别名不能为空。"
+    local alias=$1
+    if [ -z "$alias" ]; then
+        list_hosts
+        read -p "请输入要移除的主机别名: " alias
+        [ -z "$alias" ] && die "主机别名不能为空。"
+    fi
+
     if ! grep -q -E "^\s*Host\s+$alias\s*$" "$CONFIG_FILE"; then
         die "主机 '$alias' 未找到。"
     fi
@@ -179,15 +191,25 @@ remove_host() {
 }
 
 connect_host() {
-    read -p "请输入要连接的主机别名: " alias
-    [ -z "$alias" ] && die "主机别名不能为空。"
+    local alias=$1
+    if [ -z "$alias" ]; then
+        list_hosts
+        read -p "请输入要连接的主机别名: " alias
+        [ -z "$alias" ] && die "主机别名不能为空。"
+    fi
+    
     if ! grep -q -E "^\s*Host\s+$alias\s*$" "$CONFIG_FILE"; then die "主机 '$alias' 未找到。"; fi
     info "正在尝试连接到 '$alias'..."; ssh "$alias"
 }
 
 modify_host() {
-    read -p "请输入要修改的主机别名: " alias
-    [ -z "$alias" ] && die "主机别名不能为空。"
+    local alias=$1
+    if [ -z "$alias" ]; then
+        list_hosts
+        read -p "请输入要修改的主机别名: " alias
+        [ -z "$alias" ] && die "主机别名不能为空。"
+    fi
+    
     if ! grep -q -E "^\s*Host\s+$alias\s*$" "$CONFIG_FILE"; then die "主机 '$alias' 未找到。"; fi
 
     info "--- Modify Host: $alias ---"; prompt "(直接按 Enter 表示不修改)"
@@ -253,29 +275,32 @@ usage() {
     echo -e "${C_YELLOW}SSH 主机管理脚本 (sshm)${C_RESET}"
     echo "一个用于简化 ~/.ssh/config 管理的命令行工具，支持智能 IP 和端口处理。"
     echo
-    echo "用法: sshm [参数]"
+    echo "用法: sshm [参数] [别名]"
     echo
     echo "参数:"
-    echo -e "  ${C_GREEN}-a, --add${C_RESET}      交互式添加一个新的远程主机。"
-    echo -e "  ${C_GREEN}-l, --list${C_RESET}      显示所有已配置主机的详细列表。"
-    echo -e "  ${C_GREEN}-c, --connect${C_RESET}   连接到一个指定的主机。"
-    echo -e "  ${C_GREEN}-r, --remove${C_RESET}    从配置中移除一个指定的主机。"
-    echo -e "  ${C_GREEN}-m, --modify${C_RESET}    交互式修改一个已存在的主机信息。"
-    echo -e "  ${C_GREEN}-h, --help${C_RESET}      显示此帮助信息。"
+    echo -e "  ${C_GREEN}-a, --add     [alias]${C_RESET}   交互式添加一个新的远程主机。可选择提供别名。"
+    echo -e "  ${C_GREEN}-l, --list${C_RESET}              显示所有已配置主机的详细列表。"
+    echo -e "  ${C_GREEN}-c, --connect [alias]${C_RESET}   连接到一个指定的主机。如果未提供别名，则会提示输入。"
+    echo -e "  ${C_GREEN}-r, --remove  [alias]${C_RESET}   从配置中移除一个指定的主机。如果未提供别名，则会提示输入。"
+    echo -e "  ${C_GREEN}-m, --modify  [alias]${C_RESET}   交互式修改一个已存在的主机信息。如果未提供别名，则会提示输入。"
+    echo -e "  ${C_GREEN}-h, --help${C_RESET}              显示此帮助信息。"
     echo
 }
 
 # --- Main Logic & Argument Parsing ---
 
 initialize
-if [ $# -eq 0 ]; then usage; exit 1; fi
+if [ $# -eq 0 ]; then
+    list_hosts
+    exit 0
+fi
 
 case "$1" in
-    -a|--add) add_host ;;
+    -a|--add) add_host "$2" ;;
     -l|--list) list_hosts ;;
-    -c|--connect) connect_host ;;
-    -r|--remove) remove_host ;;
-    -m|--modify) modify_host ;;
+    -c|--connect) connect_host "$2" ;;
+    -r|--remove) remove_host "$2" ;;
+    -m|--modify) modify_host "$2" ;;
     -h|--help) usage ;;
     *) echo -e "${C_RED}未知参数: $1${C_RESET}"; usage; exit 1 ;;
 esac
